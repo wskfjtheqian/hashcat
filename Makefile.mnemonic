@@ -12,7 +12,9 @@ TEST_DIR = test
 LOGIC_SRCS = $(SRC_DIR)/bip39_wordlist.c \
              $(SRC_DIR)/mnemonic_fuzzy.c  \
              $(SRC_DIR)/mnemonic_address.c \
-             $(SRC_DIR)/mnemonic_permute.c
+             $(SRC_DIR)/mnemonic_permute.c \
+             $(SRC_DIR)/mnemonic_crypto.c \
+             $(SRC_DIR)/mnemonic_keygen.c
 
 DATA_SRCS  = $(wildcard $(SRC_DIR)/bip39_data_*.c)
 
