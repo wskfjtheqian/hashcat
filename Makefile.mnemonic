@@ -1,0 +1,40 @@
+# Makefile for mnemonic Phase 1 (CPU infrastructure)
+# 词表数据已编译期内嵌在 bip39_data_XX.c 中, 零运行时文件依赖
+
+CC       = gcc
+CFLAGS   = -std=gnu99 -Wall -Wextra -O2
+INCLUDES = -Iinclude
+LDFLAGS  =
+
+SRC_DIR  = src/mnemonic
+TEST_DIR = test
+
+LOGIC_SRCS = $(SRC_DIR)/bip39_wordlist.c \
+             $(SRC_DIR)/mnemonic_fuzzy.c  \
+             $(SRC_DIR)/mnemonic_address.c \
+             $(SRC_DIR)/mnemonic_permute.c
+
+DATA_SRCS  = $(wildcard $(SRC_DIR)/bip39_data_*.c)
+
+SRCS = $(LOGIC_SRCS) $(DATA_SRCS)
+OBJS = $(SRCS:.c=.o)
+
+TEST_SRC = $(TEST_DIR)/test_mnemonic.c
+TEST_BIN = test_mnemonic
+
+.PHONY: all clean test
+
+all: $(OBJS)
+	@echo "Phase 1 objects built ($(words $(OBJS)) files)."
+
+%.o: %.c
+	$(CC) $(CFLAGS) $(INCLUDES) -c $< -o $@
+
+$(TEST_BIN): $(OBJS) $(TEST_SRC)
+	$(CC) $(CFLAGS) $(INCLUDES) -o $@ $(TEST_SRC) $(OBJS) $(LDFLAGS)
+
+test: $(TEST_BIN)
+	./$(TEST_BIN)
+
+clean:
+	rm -f $(OBJS) $(TEST_BIN)
