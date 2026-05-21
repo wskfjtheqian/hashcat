@@ -41,14 +41,11 @@ void bip32_ckd_priv (const uint8_t parent_key[32],
 
 // BIP32 主密钥生成: I = HMAC-SHA512("Bitcoin seed", seed)
 // master_key  = I[0:32], master_chain = I[32:64]
-void bip32_master (const uint8_t seed[64],
-                   uint8_t master_key[32],
-                   uint8_t master_chain[32]);
+void bip32_master (const uint8_t *seed, size_t seed_len,
+                   uint8_t master_key[32], uint8_t master_chain[32]);
 
-// ── BIP44 路径派生 (简化) ──
-// path_levels: 路径深度 (通常 5: m/44'/c'/0'/0/index)
-// path: 路径各组件 (如 [0x8000002C, 0x8000003C, 0x80000000, 0, index])
-void bip44_derive (const uint8_t seed[64],
+// ── BIP44 路径派生 ──
+void bip44_derive (const uint8_t *seed, size_t seed_len,
                    const uint32_t *path,
                    uint32_t        path_levels,
                    uint8_t         derived_key[32],

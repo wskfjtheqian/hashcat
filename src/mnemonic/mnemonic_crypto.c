@@ -227,14 +227,18 @@ void pbkdf2_hmac_sha512 (const uint8_t *password, size_t password_len,
 //  BIP32
 // ═══════════════════════════════════════════════
 
-void bip32_master (const uint8_t seed[64], uint8_t master_key[32], uint8_t master_chain[32])
+void bip32_master (const uint8_t *seed, size_t seed_len,
+                   uint8_t master_key[32], uint8_t master_chain[32])
 {
   const char *key = "Bitcoin seed";
   uint8_t I[64];
-  hmac_sha512 ((const uint8_t *) key, strlen (key), seed, 64, I);
+  hmac_sha512 ((const uint8_t *) key, strlen (key), seed, seed_len, I);
   memcpy (master_key,  I,      32);
   memcpy (master_chain, I + 32, 32);
 }
+
+// 跨模块声明 (实现在 mnemonic_keygen.c)
+extern void secp256k1_get_compressed_pubkey (const uint8_t priv[32], uint8_t comp[33]);
 
 void bip32_ckd_priv (const uint8_t parent_key[32],
                      const uint8_t parent_chain[32],
@@ -255,18 +259,81 @@ void bip32_ckd_priv (const uint8_t parent_key[32],
     data[35] = (uint8_t)(index >>  8);
     data[36] = (uint8_t)(index >>  0);
     hmac_sha512 (parent_chain, 32, data, 37, I);
+
+    // child_key = (IL + parent_key) mod n
+    // secp256k1 n = FFFFFFFF FFFFFFFF FFFFFFFF FFFFFFFE BAAEDCE6 AF48A03B BFD25E8C D0364141
+    uint8_t n[32] = {
+      0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,
+      0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFE,
+      0xBA,0xAE,0xDC,0xE6,0xAF,0x48,0xA0,0x3B,
+      0xBF,0xD2,0x5E,0x8C,0xD0,0x36,0x41,0x41
+    };
+
+    // 大整数加法: IL + parent_key, 溢出时减 n
+    uint16_t carry = 0;
+    for (int i = 31; i >= 0; i--)
+    {
+      carry += (uint16_t) I[i] + parent_key[i];
+      child_key[i] = (uint8_t) carry;
+      carry >>= 8;
+    }
+
+    // 如果结果 >= n, 减 n
+    if (carry || memcmp (child_key, n, 32) >= 0)
+    {
+      uint16_t borrow = 0;
+      for (int i = 31; i >= 0; i--)
+      {
+        int diff = (int) child_key[i] - n[i] - borrow;
+        if (diff < 0) { diff += 256; borrow = 1; }
+        else borrow = 0;
+        child_key[i] = (uint8_t) diff;
+      }
+    }
   }
   else
   {
-    // 普通派生: 需要公钥 → 简化版直接用私钥 + index
-    // 完整实现需要 secp256k1 公钥推导，这里省略（Phase 2 只用 hardened）
-    uint8_t data[33];
-    memcpy (data, parent_key, 32);  // 占位
-    data[32] = (uint8_t) index;
-    hmac_sha512 (parent_chain, 32, data, 33, I);
+    // 非硬化派生: Data = ser256(point(kpar)) || ser32(i)
+    uint8_t pub_compressed[33];
+    secp256k1_get_compressed_pubkey (parent_key, pub_compressed);
+
+    uint8_t data[37];
+    memcpy (data, pub_compressed, 33);
+    data[33] = (uint8_t)(index >> 24);
+    data[34] = (uint8_t)(index >> 16);
+    data[35] = (uint8_t)(index >>  8);
+    data[36] = (uint8_t)(index >>  0);
+    hmac_sha512 (parent_chain, 32, data, 37, I);
+
+    // child_key = (IL + parent_key) mod n (复用上方的 n)
+    uint8_t n[32] = {
+      0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,
+      0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFE,
+      0xBA,0xAE,0xDC,0xE6,0xAF,0x48,0xA0,0x3B,
+      0xBF,0xD2,0x5E,0x8C,0xD0,0x36,0x41,0x41
+    };
+
+    uint16_t carry = 0;
+    for (int i = 31; i >= 0; i--)
+    {
+      carry += (uint16_t) I[i] + parent_key[i];
+      child_key[i] = (uint8_t) carry;
+      carry >>= 8;
+    }
+
+    if (carry || memcmp (child_key, n, 32) >= 0)
+    {
+      uint16_t borrow = 0;
+      for (int i = 31; i >= 0; i--)
+      {
+        int diff = (int) child_key[i] - n[i] - borrow;
+        if (diff < 0) { diff += 256; borrow = 1; }
+        else borrow = 0;
+        child_key[i] = (uint8_t) diff;
+      }
+    }
   }
 
-  memcpy (child_key,  I,      32);
   memcpy (child_chain, I + 32, 32);
 }
 
@@ -274,7 +341,7 @@ void bip32_ckd_priv (const uint8_t parent_key[32],
 //  BIP44
 // ═══════════════════════════════════════════════
 
-void bip44_derive (const uint8_t seed[64],
+void bip44_derive (const uint8_t *seed, size_t seed_len,
                    const uint32_t *path,
                    uint32_t        path_levels,
                    uint8_t         derived_key[32],
@@ -282,12 +349,12 @@ void bip44_derive (const uint8_t seed[64],
 {
   uint8_t key[32], chain[32];
 
-  bip32_master (seed, key, chain);
+  bip32_master (seed, seed_len, key, chain);
 
   for (uint32_t i = 0; i < path_levels; i++)
   {
     bool hardened = (path[i] >= 0x80000000);
-    uint32_t idx  = hardened ? (path[i] & 0x7FFFFFFF) : path[i];
+    uint32_t idx  = path[i];  // 完整索引, ser32 编码需要包含硬化位
     uint8_t  new_key[32], new_chain[32];
 
     bip32_ckd_priv (key, chain, idx, hardened, new_key, new_chain);

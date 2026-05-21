@@ -410,6 +410,7 @@ static void jacobian_add (jacobian_t *r, const jacobian_t *a, const jacobian_t *
 
 void secp256k1_pubkey (const uint8_t privkey[32], uint8_t pubkey[65])
 {
+  // (现有实现)
   bn256_t k;
   memset (&k, 0, sizeof (k));
   for (int i = 0; i < 32; i++)
@@ -467,6 +468,16 @@ void secp256k1_pubkey (const uint8_t privkey[32], uint8_t pubkey[65])
     pubkey[33 + i*4 + 2] = (uint8_t)(r.y.d[i] >> 16);
     pubkey[33 + i*4 + 3] = (uint8_t)(r.y.d[i] >> 24);
   }
+}
+
+void secp256k1_get_compressed_pubkey (const uint8_t priv[32], uint8_t comp[33])
+{
+  uint8_t uncompressed[65];
+  secp256k1_pubkey (priv, uncompressed);
+
+  // 压缩格式: 0x02 (y偶数) 或 0x03 (y奇数) + x坐标
+  comp[0] = (uncompressed[64] & 1) ? 0x03 : 0x02;
+  memcpy (comp + 1, uncompressed + 1, 32);
 }
 
 // ═══════════════════════════════════════════════
