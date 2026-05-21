@@ -223,6 +223,15 @@ static const uint32_t secp256k1_p[8] =
   0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff,
 };
 
+#define SECP256K1_P0 0xfffffc2f
+#define SECP256K1_P1 0xfffffffe
+#define SECP256K1_P2 0xffffffff
+#define SECP256K1_P3 0xffffffff
+#define SECP256K1_P4 0xffffffff
+#define SECP256K1_P5 0xffffffff
+#define SECP256K1_P6 0xffffffff
+#define SECP256K1_P7 0xffffffff
+
 // 基点 G 的 x 坐标
 static const uint32_t secp256k1_gx[8] =
 {
@@ -305,21 +314,81 @@ static void bn_mul (uint32_t *r, const uint32_t *a, const uint32_t *b)
 
 static void bn_mod (bn256_t *r, const uint32_t *prod)
 {
-  // 简化的 fast reduction for secp256k1 p = 2^256 - 2^32 - 2^9 - 2^8 - 2^7 - 2^6 - 2^4 - 1
-  uint32_t t[16];
-  memcpy (t, prod, 64);
-  memset (t + 8, 0, 32);
+  // secp256k1 fast reduction: p = 2^256 - 2^32 - 977
+  // 977 = 0x3D1
+  uint32_t t0=prod[0], t1=prod[1], t2=prod[2], t3=prod[3];
+  uint32_t t4=prod[4], t5=prod[5], t6=prod[6], t7=prod[7];
+  uint32_t t8=prod[8], t9=prod[9], t10=prod[10], t11=prod[11];
+  uint32_t t12=prod[12], t13=prod[13], t14=prod[14], t15=prod[15];
 
-  // 简化的 modular reduction (完整实现略长)
-  // 此处使用减法循环作为回退
-  bn256_t p;
-  memcpy (p.d, secp256k1_p, 32);
+  uint64_t s0 = (uint64_t)t0 + t8 + (uint64_t)t9*0x3D1 + t10*0x3D1 + t11*0x3D1
+              + t12*0x3D1 + t13*0x3D1 + t14*0x3D1 + t15*0x3D1;
+  uint32_t r0 = (uint32_t)s0; s0 >>= 32;
+  uint64_t s1 = (uint64_t)t1 + t9 + t10*0x3D1 + t11*0x3D1 + t12*0x3D1
+              + t13*0x3D1 + t14*0x3D1 + t15*0x3D1 + s0;
+  uint32_t r1 = (uint32_t)s1; s1 >>= 32;
+  uint64_t s2 = (uint64_t)t2 + t10 + t11*0x3D1 + t12*0x3D1 + t13*0x3D1
+              + t14*0x3D1 + t15*0x3D1 + s1;
+  uint32_t r2 = (uint32_t)s2; s2 >>= 32;
+  uint64_t s3 = (uint64_t)t3 + t11 + t12*0x3D1 + t13*0x3D1 + t14*0x3D1
+              + t15*0x3D1 + s2;
+  uint32_t r3 = (uint32_t)s3; s3 >>= 32;
+  uint64_t s4 = (uint64_t)t4 + t12 + t13*0x3D1 + t14*0x3D1 + t15*0x3D1 + s3;
+  uint32_t r4 = (uint32_t)s4; s4 >>= 32;
+  uint64_t s5 = (uint64_t)t5 + t13 + t14*0x3D1 + t15*0x3D1 + s4;
+  uint32_t r5 = (uint32_t)s5; s5 >>= 32;
+  uint64_t s6 = (uint64_t)t6 + t14 + t15*0x3D1 + s5;
+  uint32_t r6 = (uint32_t)s6; s6 >>= 32;
+  uint64_t s7 = (uint64_t)t7 + t15 + s6;
+  uint32_t r7 = (uint32_t)s7;
 
-  memcpy (r->d, t, 32);
-  while (bn_is_ge (r, &p))
+  // 若 ≥ p, 减 p
+  if (s7 > 0 || (r7 == 0xffffffff && r6 == 0xffffffff && r5 == 0xffffffff
+      && r4 == 0xffffffff && r3 == 0xffffffff && r2 == 0xffffffff
+      && r1 == 0xfffffffe && r0 >= 0xfffffc2f))
   {
-    bn_sub (r, r, &p);
+    uint64_t b = 0;
+    b = (uint64_t)r0 - SECP256K1_P0; r->d[0] = (uint32_t)b; b = (b>>32)&1;
+    b = (uint64_t)r1 - SECP256K1_P1 - b; r->d[1] = (uint32_t)b; b = (b>>32)&1;
+    b = (uint64_t)r2 - SECP256K1_P2 - b; r->d[2] = (uint32_t)b; b = (b>>32)&1;
+    b = (uint64_t)r3 - SECP256K1_P3 - b; r->d[3] = (uint32_t)b; b = (b>>32)&1;
+    b = (uint64_t)r4 - SECP256K1_P4 - b; r->d[4] = (uint32_t)b; b = (b>>32)&1;
+    b = (uint64_t)r5 - SECP256K1_P5 - b; r->d[5] = (uint32_t)b; b = (b>>32)&1;
+    b = (uint64_t)r6 - SECP256K1_P6 - b; r->d[6] = (uint32_t)b; b = (b>>32)&1;
+    b = (uint64_t)r7 - SECP256K1_P7 - b; r->d[7] = (uint32_t)b;
   }
+  else
+  {
+    r->d[0]=r0;r->d[1]=r1;r->d[2]=r2;r->d[3]=r3;
+    r->d[4]=r4;r->d[5]=r5;r->d[6]=r6;r->d[7]=r7;
+  }
+}
+
+static void bn_mod_inv (bn256_t *r, const bn256_t *a)
+{
+  // z^(p-2) mod p via square-and-multiply
+  uint32_t base[8], result[8];
+  memcpy (base, a->d, 32);
+  memset (result, 0, 32); result[0] = 1;
+
+  // p-2 = FFFFFFFF FFFFFFFF FFFFFFFF FFFFFFFF FFFFFFFF FFFFFFFF FFFFFFFE FFFFFC2D
+  uint32_t exp[8] = {0xFFFFFC2D,0xFFFFFFFE,0xFFFFFFFF,0xFFFFFFFF,0xFFFFFFFF,0xFFFFFFFF,0xFFFFFFFF,0xFFFFFFFF};
+
+  for (int byte = 7; byte >= 0; byte--)
+  {
+    for (int bit = 7; bit >= 0; bit--)
+    {
+      uint32_t sq[16];
+      bn_mul (sq, result, result); bn_mod ((bn256_t*)sq, sq);
+      memcpy (result, sq, 32);
+      if ((exp[byte] >> bit) & 1)
+      {
+        bn_mul (sq, result, base); bn_mod ((bn256_t*)sq, sq);
+        memcpy (result, sq, 32);
+      }
+    }
+  }
+  memcpy (r->d, result, 32);
 }
 
 static void bn_mod_mul (bn256_t *r, const bn256_t *a, const bn256_t *b)
@@ -433,40 +502,21 @@ void secp256k1_pubkey (const uint8_t privkey[32], uint8_t pubkey[65])
     }
   }
 
-  // Jacobian → affine
-  bn256_t zinv, zinv2;
-  if (bn_is_zero (&r.z))
-  {
-    memset (pubkey, 0, 65);
-    return;
-  }
-
-  // zinv = z^(p-2) mod p (Fermat)
-  bn256_t tz;
-  memcpy (tz.d, r.z.d, 32);
-  memcpy (zinv.d, secp256k1_p, 32);
-  for (int i = 0; i < 2; i++) bn_mod_sub (&zinv, &zinv, &tz);
-  // 简化：用 2 次减法近似 (p-2) 的倒数 —— 这不正确但用于 Phase 2 占位
-  // 正确实现需要完整的 modular exponentiation
-  // 回退：直接使用 x/z^2 的简化计算
-  bn_mod_mul (&zinv2, &r.z, &r.z);
-  bn_mod_mul (&zinv, &zinv, &zinv);
-
+  // Jacobian → affine: x = X/Z^2, y = Y/Z^3
+  bn256_t zinv, zinv2, zinv3;
+  bn_mod_inv (&zinv, &r.z);
+  bn_mod_mul (&zinv2, &zinv, &zinv);
+  bn_mod_mul (&zinv3, &zinv2, &zinv);
   bn_mod_mul (&r.x, &r.x, &zinv2);
-  bn_mod_mul (&r.y, &r.y, &zinv);
-  bn_mod_mul (&r.y, &r.y, &zinv2);
+  bn_mod_mul (&r.y, &r.y, &zinv3);
 
   pubkey[0] = 0x04;
-  for (int i = 0; i < 8; i++)
+  for (int i = 0; i < 32; i++)
   {
-    pubkey[1  + i*4 + 0] = (uint8_t)(r.x.d[i] >>  0);
-    pubkey[1  + i*4 + 1] = (uint8_t)(r.x.d[i] >>  8);
-    pubkey[1  + i*4 + 2] = (uint8_t)(r.x.d[i] >> 16);
-    pubkey[1  + i*4 + 3] = (uint8_t)(r.x.d[i] >> 24);
-    pubkey[33 + i*4 + 0] = (uint8_t)(r.y.d[i] >>  0);
-    pubkey[33 + i*4 + 1] = (uint8_t)(r.y.d[i] >>  8);
-    pubkey[33 + i*4 + 2] = (uint8_t)(r.y.d[i] >> 16);
-    pubkey[33 + i*4 + 3] = (uint8_t)(r.y.d[i] >> 24);
+    // r.x.d 是 8×u32 小端，需转大端输出
+    int wi = i / 4, bi = i % 4;
+    pubkey[1  + i] = (uint8_t)(r.x.d[7 - wi] >> ((3 - bi) * 8));
+    pubkey[33 + i] = (uint8_t)(r.y.d[7 - wi] >> ((3 - bi) * 8));
   }
 }
 
